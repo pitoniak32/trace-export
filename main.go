@@ -1,17 +1,18 @@
 package main
 
 import (
-	"log"
-	"net/http"
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-  "github.com/pitoniak32/trace-export/pkg/roll"
 	"github.com/pitoniak32/trace-export/pkg/otel"
+	"github.com/pitoniak32/trace-export/pkg/roll"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -49,6 +50,8 @@ func run() (err error) {
 	go func() {
 		srvErr <- srv.ListenAndServe()
 	}()
+
+	fmt.Println("Starting server!")
 
 	// Wait for interruption.
 	select {

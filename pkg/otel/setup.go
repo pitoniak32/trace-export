@@ -15,15 +15,19 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+const OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY string = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+
 var (
 	otlpEndpoint string
 )
 
+// init functions are always executed.
 func init() {
-	otlpEndpoint = os.Getenv("OTLP_ENDPOINT")
+	fmt.Println("Getting the collector uri from env!")
+	otlpEndpoint = os.Getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
 
 	if otlpEndpoint == "" {
-		panic("set OTLP_ENDPOINT")
+		panic(fmt.Sprintf("ensure %s is set!", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY))
 	}
 }
 

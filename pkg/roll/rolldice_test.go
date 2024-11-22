@@ -6,6 +6,6 @@ import (
 )
 
 func TestNothing(t *testing.T) {
-    fmt.Printf("running test")
-    t.Fatalf("Oppsie!")
+	fmt.Printf("running test")
+	t.Fatalf("Oppsie!")
 }
