@@ -1,0 +1,41 @@
+services:
+  jaeger-all-in-one:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317"
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    command: ["--config=env:OTEL_COLLECTOR_CONFIG", "${OTELCOL_ARGS}"]
+    ports:
+      - "13133:13133" # health_check extension
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    environment:
+      OTEL_COLLECTOR_CONFIG: |
+        receivers:
+          otlp:
+            protocols:
+              http: 
+                endpoint: 0.0.0.0:4318
+              grpc:
+                endpoint: 0.0.0.0:4317
+        exporters:
+          debug:
+          otlp/jaeger:
+            endpoint: jaeger-all-in-one:4317
+            tls:
+              insecure: true
+        extensions:
+          health_check:
+        service:
+          extensions: [health_check]
+          pipelines:
+            traces:
+              receivers: [otlp]
+              processors: []
+              exporters: [debug, otlp/jaeger]
+            metrics:
+              receivers: [otlp]
+              processors: []
+              exporters: [debug]

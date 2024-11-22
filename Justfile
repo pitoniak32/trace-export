@@ -8,17 +8,25 @@ set dotenv-load
 run:
   go run main.go
 
-# test all packages
+# Test all packages
 test: 
   go test ./...
 
-# lint all packages
-lint:
+# Lint all packages
+lint: fmt
   golangci-lint run ./..
 
-# format all packages
+# Format all packages
 fmt:
   go fmt ./...
+
+# Setup supporting services
+local-setup:
+  docker compose -f ./docker-compose.yml up -d
+
+# Tear down for local dev
+local-teardown:
+  docker kill $(docker ps -q)
 
 ###############################################################################
 # Fun Recipes
