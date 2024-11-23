@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,9 +13,15 @@ import (
 	"time"
 
 	"github.com/pitoniak32/trace-export/pkg/otel"
-	"github.com/pitoniak32/trace-export/pkg/roll"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	gotel "go.opentelemetry.io/otel"
+)
+
+const name = "go.opentelemetry.io/otel/example/dice"
+
+var (
+	tracer = gotel.Tracer(name)
 )
 
 func main() {
@@ -81,10 +88,22 @@ func newHTTPHandler() http.Handler {
 	}
 
 	// Register handlers.
-	handleFunc("/rolldice/", roll.Rolldice)
-	handleFunc("/rolldice/{player}", roll.Rolldice)
+	handleFunc("/webhook", ghWebhook)
 
 	// Add HTTP instrumentation for the whole server.
 	handler := otelhttp.NewHandler(mux, "/")
 	return handler
+}
+
+func ghWebhook(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "gh-webhook")
+	defer span.End()
+	var foo interface{}
+	dec := json.NewDecoder(r.Body)
+	err := dec.Decode(&foo)
+	if err != nil {
+		panic("couldn't decode")
+	}
+
+	fmt.Println(foo)
 }
