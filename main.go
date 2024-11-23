@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -16,31 +17,22 @@ import (
 	"github.com/pitoniak32/trace-export/pkg/otel"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	gotel "go.opentelemetry.io/otel"
+	eo "go.opentelemetry.io/otel"
 )
 
-const name = "go.opentelemetry.io/otel/example/dice"
+const serviceName = "github.com/pitoniak32/trace-export/workflow_run"
 
 var (
-	tracer = gotel.Tracer(name)
+	tracerService = eo.Tracer(serviceName)
 )
 
 func main() {
-	// if err := run(); err != nil {
-	// 	log.Fatalln(err)
-	// }
-
-	// Need to find out the best way to deal with the GitHub payload missing fields.
-	// var test *string
-
-	// fmt.Println(*test)
-
 	plan, err := os.ReadFile("./workflow_run_webhook_events.json")
 	if err != nil {
 		panic("failed to read test data")
 	}
 
-	var events [2]eg.WorkflowRunEvent
+	var events [3]eg.WorkflowRunEvent
 	err = json.Unmarshal(plan, &events)
 	if err != nil {
 		panic("failed to unmarshal")
@@ -49,10 +41,11 @@ func main() {
 	for i := 0; i < len(events); i++ {
 		event := events[i]
 
-		ig.HandlePayload(event)
+		err := ig.HandlePayload(event)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
-
-	// fmt.Printf("%+v\n", event)
 
 }
 
@@ -64,7 +57,7 @@ func run() (err error) {
 	// Set up OpenTelemetry.
 	otelShutdown, err := otel.SetupOTelSDK(ctx)
 	if err != nil {
-		return
+		return err
 	}
 	// Handle shutdown properly so nothing leaks.
 	defer func() {
@@ -109,7 +102,7 @@ func newHTTPHandler() http.Handler {
 	// which enriches the handler's HTTP instrumentation with the pattern as the http.route.
 	handleFunc := func(pattern string, handlerFunc func(http.ResponseWriter, *http.Request)) {
 		// Configure the "http.route" for the HTTP instrumentation.
-		handler := otelhttp.WithRouteTag(pattern, http.HandlerFunc(handlerFunc))
+		handler := http.HandlerFunc(handlerFunc)
 		mux.Handle(pattern, handler)
 	}
 
@@ -122,26 +115,30 @@ func newHTTPHandler() http.Handler {
 }
 
 func ghWebhook(w http.ResponseWriter, r *http.Request) {
-	_, span := tracer.Start(r.Context(), "gh-webhook")
+	_, span := tracerService.Start(r.Context(), "github-webhook")
 	defer span.End()
-	var foo map[string]interface{}
-	dec := json.NewDecoder(r.Body)
-	err := dec.Decode(&foo)
-	if err != nil {
-		panic("couldn't decode")
+
+	workflowRunEvent, err := webhookFromBody(r.Body)
+	if err != nil || workflowRunEvent == nil {
+		panic(fmt.Errorf("failed to get WorkflowRunEvent from request body: %s", err))
 	}
 
-	final, err := json.MarshalIndent(foo, "", "  ")
+	err = ig.HandlePayload(*workflowRunEvent)
 	if err != nil {
-		panic("failed marshal")
+		fmt.Println(err)
 	}
+}
 
+func webhookFromBody(body io.ReadCloser) (*eg.WorkflowRunEvent, error) {
+	dec := json.NewDecoder(body)
+	if dec == nil {
+		return nil, errors.New("failed to create json decoder for request body")
+	}
 	var event eg.WorkflowRunEvent
-	err = json.Unmarshal(final, &event)
+	err := dec.Decode(&event)
 	if err != nil {
-		panic("failed to unmarshal")
+		return nil, err
 	}
 
-	fmt.Println(string(final))
-	fmt.Printf("%+v\n", event)
+	return &event, nil
 }

@@ -9,8 +9,8 @@ run:
   go run main.go
 
 # Test all packages
-test: 
-  go test ./...
+test flags="": 
+  go test {{flags}} ./...
 
 # Lint all packages
 lint: fmt
