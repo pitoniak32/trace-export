@@ -14,7 +14,7 @@ test:
 
 # Lint all packages
 lint: fmt
-  golangci-lint run ./..
+  golangci-lint run
 
 # Format all packages
 fmt:

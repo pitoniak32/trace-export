@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
+	eg "github.com/google/go-github/v66/github"
+	ig "github.com/pitoniak32/trace-export/pkg/github"
 	"github.com/pitoniak32/trace-export/pkg/otel"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -25,9 +26,34 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatalln(err)
+	// if err := run(); err != nil {
+	// 	log.Fatalln(err)
+	// }
+
+	// Need to find out the best way to deal with the GitHub payload missing fields.
+	// var test *string
+
+	// fmt.Println(*test)
+
+	plan, err := os.ReadFile("./workflow_run_webhook_events.json")
+	if err != nil {
+		panic("failed to read test data")
 	}
+
+	var events [2]eg.WorkflowRunEvent
+	err = json.Unmarshal(plan, &events)
+	if err != nil {
+		panic("failed to unmarshal")
+	}
+
+	for i := 0; i < len(events); i++ {
+		event := events[i]
+
+		ig.HandlePayload(event)
+	}
+
+	// fmt.Printf("%+v\n", event)
+
 }
 
 func run() (err error) {
@@ -98,12 +124,24 @@ func newHTTPHandler() http.Handler {
 func ghWebhook(w http.ResponseWriter, r *http.Request) {
 	_, span := tracer.Start(r.Context(), "gh-webhook")
 	defer span.End()
-	var foo interface{}
+	var foo map[string]interface{}
 	dec := json.NewDecoder(r.Body)
 	err := dec.Decode(&foo)
 	if err != nil {
 		panic("couldn't decode")
 	}
 
-	fmt.Println(foo)
+	final, err := json.MarshalIndent(foo, "", "  ")
+	if err != nil {
+		panic("failed marshal")
+	}
+
+	var event eg.WorkflowRunEvent
+	err = json.Unmarshal(final, &event)
+	if err != nil {
+		panic("failed to unmarshal")
+	}
+
+	fmt.Println(string(final))
+	fmt.Printf("%+v\n", event)
 }
