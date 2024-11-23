@@ -7,15 +7,19 @@ import (
 	"os"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	ot "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 const OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY string = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+
+const serviceTracerName = "github.com/pitoniak32/trace-export"
+const workflowRunTracerName = "github.com/pitoniak32/trace-export/workflow_run"
 
 var (
 	otlpEndpoint string
@@ -33,7 +37,7 @@ func init() {
 
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
-func SetupOTelSDK(ctx context.Context) (shutdown func(context.Context) error, err error) {
+func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTracer ot.Tracer, shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
 	// shutdown calls cleanup functions registered via shutdownFuncs.
@@ -53,30 +57,45 @@ func SetupOTelSDK(ctx context.Context) (shutdown func(context.Context) error, er
 		err = errors.Join(inErr, shutdown(ctx))
 	}
 
-	// Set up propagator.
-	prop := newPropagator()
-	otel.SetTextMapPropagator(prop)
-
-	// Set up trace provider.
-	tracerProvider, err := newTraceProvider()
+	// Set up trace provider for workflow run traces.
+	wfResource, err := resource.New(
+		ctx,
+		resource.WithTelemetrySDK(),
+		resource.WithAttributes(semconv.ServiceName("trace-workflow-run")),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("failed to setup workflow run tracer provider resource: %s", err))
+	}
+	tracerProviderWorkflowRun, err := NewTracerProvider(*wfResource)
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
-	otel.SetTracerProvider(tracerProvider)
+	shutdownFuncs = append(shutdownFuncs, tracerProviderWorkflowRun.Shutdown)
+	workflowRunTracer = tracerProviderWorkflowRun.Tracer(workflowRunTracerName)
+
+	// We need to create a new tracer provider here to use for our service traces
+	// because the global one is used for the traces of workflow runs.
+	sResource, err := resource.New(
+		ctx,
+		resource.WithTelemetrySDK(),
+		resource.WithAttributes(semconv.ServiceName("trace-export-service")),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("failed to setup service tracer provider resource: %s", err))
+	}
+	tracerProviderService, err := NewTracerProvider(*sResource)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	shutdownFuncs = append(shutdownFuncs, tracerProviderService.Shutdown)
+	serviceTracer = tracerProviderService.Tracer(serviceTracerName)
 
 	return
 }
 
-func newPropagator() propagation.TextMapPropagator {
-	return propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	)
-}
-
-func newTraceProvider() (*trace.TracerProvider, error) {
+func NewTracerProvider(resource resource.Resource) (*trace.TracerProvider, error) {
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -99,6 +118,7 @@ func newTraceProvider() (*trace.TracerProvider, error) {
 	// }
 
 	traceProvider := trace.NewTracerProvider(
+		trace.WithResource(&resource),
 		trace.WithBatcher(exporter,
 			// Default is 5s. Set to 1s for demonstrative purposes.
 			trace.WithBatchTimeout(time.Second)),

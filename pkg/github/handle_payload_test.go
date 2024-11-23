@@ -6,8 +6,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	eg "github.com/google/go-github/v66/github"
+	"github.com/pitoniak32/trace-export/pkg/internal"
+)
+
+var (
+	testTracer = internal.NewTestTracer()
 )
 
 func TestHandlePayloadRequestedOrInProgress(t *testing.T) {
@@ -54,10 +60,12 @@ func TestHandlePayloadCompleted(t *testing.T) {
 
 			jobsUrl := tt.jobsUrl
 			var workflowRun eg.WorkflowRun = eg.WorkflowRun{
-				JobsURL: jobsUrl,
+				RunStartedAt: &eg.Timestamp{Time: time.Now()},
+				UpdatedAt:    &eg.Timestamp{Time: time.Now()},
+				JobsURL:      jobsUrl,
 			}
 
-			err := HandleWorkflowRunCompleted(workflowRun, 1234)
+			err := HandleWorkflowRunCompleted(workflowRun, 1234, testTracer)
 
 			if err != nil {
 				if !strings.Contains(err.Error(), tt.want) {

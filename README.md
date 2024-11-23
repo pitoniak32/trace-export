@@ -2,6 +2,10 @@
 
 Export traces for github actions in go
 
+
+
+https://opentelemetry.io/blog/2023/testing-otel-demo/
+
 # Usage
 
 This repo uses `just` (like make) to run common tasks.

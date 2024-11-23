@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -17,36 +18,56 @@ import (
 	"github.com/pitoniak32/trace-export/pkg/otel"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	eo "go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
-
-const serviceName = "github.com/pitoniak32/trace-export/workflow_run"
 
 var (
-	tracerService = eo.Tracer(serviceName)
+	serviceTracer     trace.Tracer
+	workflowRunTracer trace.Tracer
+	otelShutdown      func(context.Context) error
 )
 
+func init() {
+	// Set up OpenTelemetry.
+	ctx := context.Background()
+	var err error
+	serviceTracer, workflowRunTracer, otelShutdown, err = otel.SetupOTelSDK(ctx)
+	if err != nil {
+		var _ = otelShutdown(ctx)
+		panic(fmt.Sprintf("Failed to setup OtelSDK because of: %s", err))
+	}
+}
+
 func main() {
-	plan, err := os.ReadFile("./workflow_run_webhook_events.json")
-	if err != nil {
-		panic("failed to read test data")
+
+	if err := run(); err != nil {
+		log.Fatalln(err)
 	}
 
-	var events [3]eg.WorkflowRunEvent
-	err = json.Unmarshal(plan, &events)
-	if err != nil {
-		panic("failed to unmarshal")
-	}
+	// plan, err := os.ReadFile("./workflow_run_webhook_events.json")
+	// if err != nil {
+	// 	panic("failed to read test data")
+	// }
 
-	for i := 0; i < len(events); i++ {
-		event := events[i]
+	// var events [3]eg.WorkflowRunEvent
+	// err = json.Unmarshal(plan, &events)
+	// if err != nil {
+	// 	panic("failed to unmarshal")
+	// }
 
-		err := ig.HandlePayload(event)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
+	// for i := 0; i < len(events); i++ {
+	// 	event := events[i]
 
+	// 	err := ig.HandlePayload(event)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 	}
+	// }
+
+	// err = otelShutdown(context.Background())
+	// if err != nil {
+	// 	panic("failure occurred during Otel SDK shutdown")
+	// }
 }
 
 func run() (err error) {
@@ -54,11 +75,6 @@ func run() (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Set up OpenTelemetry.
-	otelShutdown, err := otel.SetupOTelSDK(ctx)
-	if err != nil {
-		return err
-	}
 	// Handle shutdown properly so nothing leaks.
 	defer func() {
 		err = errors.Join(err, otelShutdown(context.Background()))
@@ -115,7 +131,7 @@ func newHTTPHandler() http.Handler {
 }
 
 func ghWebhook(w http.ResponseWriter, r *http.Request) {
-	_, span := tracerService.Start(r.Context(), "github-webhook")
+	_, span := serviceTracer.Start(r.Context(), "github-webhook")
 	defer span.End()
 
 	workflowRunEvent, err := webhookFromBody(r.Body)
@@ -123,7 +139,7 @@ func ghWebhook(w http.ResponseWriter, r *http.Request) {
 		panic(fmt.Errorf("failed to get WorkflowRunEvent from request body: %s", err))
 	}
 
-	err = ig.HandlePayload(*workflowRunEvent)
+	err = ig.HandlePayload(*workflowRunEvent, workflowRunTracer)
 	if err != nil {
 		fmt.Println(err)
 	}

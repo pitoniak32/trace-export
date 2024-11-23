@@ -5,7 +5,5 @@ jobs:
   my_job:
     runs-on: ubuntu-latest
     steps:
-    - name: Mask fruit
-      uses: pitoniak32/rust-action@main
-      with:
-        fruit: banana
+    - name: say-hi
+      run: echo "Hello!"

@@ -1,15 +1,18 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
 	eg "github.com/google/go-github/v66/github"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-func HandlePayload(payload eg.WorkflowRunEvent) error {
+func HandlePayload(payload eg.WorkflowRunEvent, tracer trace.Tracer) error {
 	payloadAction := payload.GetAction()
 	if payloadAction == "" {
 		return errors.New("Webhook Payload.Action was not found.")
@@ -29,7 +32,7 @@ func HandlePayload(payload eg.WorkflowRunEvent) error {
 	case "in_progress":
 		return HandleWorkflowRunInProgress(*workflowRun, workflowRunID)
 	case "completed":
-		return HandleWorkflowRunCompleted(*workflowRun, workflowRunID)
+		return HandleWorkflowRunCompleted(*workflowRun, workflowRunID, tracer)
 	default:
 		return HandleWorkflowRunUnknown(*workflowRun, workflowRunID)
 	}
@@ -45,7 +48,38 @@ func HandleWorkflowRunInProgress(_w eg.WorkflowRun, runId int64) error {
 	return nil
 }
 
-func HandleWorkflowRunCompleted(w eg.WorkflowRun, runId int64) error {
+func HandleWorkflowRunCompleted(w eg.WorkflowRun, runId int64, tracer trace.Tracer) error {
+
+	startTime := w.GetRunStartedAt().Time
+	if startTime.IsZero() {
+		return &WorkflowRunHandlingError{
+			errMsg:        "Cannot find 'run_start_time' on the workflow_run event",
+			workflowRunID: &runId,
+		}
+	}
+
+	// The time that this workflow run completed (since this is the completed handler)
+	endTime := w.GetUpdatedAt().Time
+	if endTime.IsZero() {
+		return &WorkflowRunHandlingError{
+			errMsg:        "Cannot find 'updated_at' on the workflow_run event",
+			workflowRunID: &runId,
+		}
+	}
+
+	spanName := w.GetName()
+	if spanName == "" {
+		spanName = "UNKNOWN"
+	}
+
+	attributes := []attribute.KeyValue{
+		attribute.Int64("workflow_run.id", runId),
+	}
+
+	// Start a new span using the workflow run tracer.
+	_, span := tracer.Start(context.Background(), spanName, trace.WithTimestamp(startTime), trace.WithAttributes(attributes...))
+	defer span.End(trace.WithTimestamp(endTime))
+
 	fmt.Printf("[HANDLE]: workflow run '%d' is 'completed'.\n", runId)
 
 	jobsUrl := w.GetJobsURL()
