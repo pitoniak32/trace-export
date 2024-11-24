@@ -20,12 +20,18 @@ lint: fmt
 fmt:
   go fmt ./...
 
-# Setup supporting services
-local-setup:
+# Setup forward for github workflow_run webhooks to localhost for local dev
+forward: local-up
+  gh webhook forward --repo=pitoniak32/trace-export --events=workflow_run --url=http://localhost:8080/webhook
+
+# Setup supporting services for local dev
+local-up:
+  @echo "Starting Docker Services..."
   docker compose -f ./docker-compose.yml up -d
 
 # Tear down for local dev
-local-teardown:
+local-down:
+  @echo "Tearing Down Docker Services..."
   docker kill $(docker ps -q)
 
 ###############################################################################
