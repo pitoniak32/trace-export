@@ -7,7 +7,7 @@
 # Notes for CI
 - installing `golangci-lint` - https://golangci-lint.run/welcome/install/#ci-installation
 
-# VSCode
+# VSCode Setup Tips
 
 1. Install `Go - Go Team at Google` extension
 2. Update linter 
@@ -15,7 +15,15 @@
    2. Search `go.lintTool`
    3. Set value to `golangci-lint` (make sure you have done the [Pre Reqs](#pre-requisites))
 
-## Running locally
+## Available Commands
+
+This repo uses `just` (like make) to run common tasks.
+- `just run`
+- `just test`
+- `just fmt`
+- `just lint`
+
+## Running Locally
 
 You can forward webhooks from github to your localhost with the gh cli!
 - https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing
