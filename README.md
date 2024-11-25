@@ -13,7 +13,7 @@ Once these traces are generated you can go anything you would like with them. In
 - The data is not locked to a specific vendors tooling! (See [Vendors](https://opentelemetry.io/ecosystem/vendors/) who natively support OpenTelemetry!)
 
 ### How
-The way this is done is by taking a [workflow_run](https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run) webhook from github and reacting to `completed` events. When an event with the `completed` action is recieved it will be handled by the service. Downloading all the associated jobs of the workflow run, and generating spans. This workflow run trace will be exported to the configured otlp tracing backend that is configured by your app (typically a https://opentelemetry.io/docs/collector/) but in some cases it might make more sense to directly export to a specific backend.
+The way this is done is by taking a [workflow_run](https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run) webhook from github and reacting to `completed` events. When an event with the `completed` action is received it will be handled by the service. It will fetch all the associated jobs of the workflow run from the GitHub API, and generate spans. This trace will be exported to the otlp tracing backend that is configured by your app (typically a https://opentelemetry.io/docs/collector/) but in some cases it might make more sense to directly export to a specific backend.
 
 
 ### TODO
