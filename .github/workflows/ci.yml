@@ -5,5 +5,9 @@ jobs:
   my_job:
     runs-on: ubuntu-latest
     steps:
+    - name: setup-hi
+      run: sleep 10
     - name: say-hi
-      run: echo "Hello!"
+      run: sleep 5 && echo "Hello!"
+    - name: teardown-hi
+      run: sleep 10

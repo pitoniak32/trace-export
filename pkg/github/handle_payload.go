@@ -77,7 +77,7 @@ func HandleWorkflowRunCompleted(w eg.WorkflowRun, runId int64, tracer trace.Trac
 	}
 
 	// Start a new span using the workflow run tracer.
-	_, span := tracer.Start(context.Background(), spanName, trace.WithTimestamp(startTime), trace.WithAttributes(attributes...))
+	ctx, span := tracer.Start(context.Background(), spanName, trace.WithTimestamp(startTime), trace.WithAttributes(attributes...))
 	defer span.End(trace.WithTimestamp(endTime))
 
 	fmt.Printf("[HANDLE]: workflow run '%d' is 'completed'.\n", runId)
@@ -99,26 +99,18 @@ func HandleWorkflowRunCompleted(w eg.WorkflowRun, runId int64, tracer trace.Trac
 		}
 	}
 
-	var foo eg.Jobs
+	var jobs eg.Jobs
 	dec := json.NewDecoder(res.Body)
-	err = dec.Decode(&foo)
+	err = dec.Decode(&jobs)
 	if err != nil {
 		panic("couldn't decode")
 	}
-	fmt.Printf("Found %d job(s) to trace!\n", foo.GetTotalCount())
 
-	// jobs, err := json.MarshalIndent(foo, "", "  ")
-	// if err != nil {
-	// 	panic("marshal failed")
-	// }
-	// fmt.Println(string(jobs))
+	err = TraceWorkflowJobs(ctx, startTime, jobs, tracer)
+	if err != nil {
+		return err
+	}
 
-	// get pretty json string
-	// result, err := json.MarshalIndent(w, "", "  ")
-	// if err != nil {
-	// 	panic("marshal failed")
-	// }
-	// fmt.Println(string(result))
 	return nil
 }
 

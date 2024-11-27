@@ -5,31 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
+
 	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/sdk/trace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	ot "go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY string = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 
+const CLOUD_RUN_EXECUTION_KEY string = "CLOUD_RUN_EXECUTION"
+const CLOUD_RUN_TASK_INDEX_KEY string = "CLOUD_RUN_TASK_INDEX"
+
 const serviceTracerName = "github.com/pitoniak32/trace-export"
 const workflowRunTracerName = "github.com/pitoniak32/trace-export/workflow_run"
 
-var (
-	otlpEndpoint string
-)
+// var (
+// 	otlpEndpoint string
+// )
 
 // init functions are always executed.
 func init() {
-	fmt.Println("Getting the collector uri from env!")
-	otlpEndpoint = os.Getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
+	// fmt.Println("Getting the collector uri from env!")
+	// otlpEndpoint = os.Getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
 }
 
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
@@ -58,7 +58,10 @@ func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTrac
 	wfResource, err := resource.New(
 		ctx,
 		resource.WithTelemetrySDK(),
-		resource.WithAttributes(semconv.ServiceName("trace-workflow-run")),
+		resource.WithAttributes(
+			semconv.ServiceName("trace-workflow-run"),
+			semconv.GCPCloudRunJobExecution(os.Getenv(CLOUD_RUN_EXECUTION_KEY)),
+		),
 	)
 	if err != nil {
 		panic(fmt.Sprintf("failed to setup workflow run tracer provider resource: %s", err))
@@ -92,37 +95,41 @@ func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTrac
 	return
 }
 
-func NewTracerProvider(resource resource.Resource) (*trace.TracerProvider, error) {
+func NewTracerProvider(resource resource.Resource) (*sdktrace.TracerProvider, error) {
 
-	var exporter trace.SpanExporter
-	if otlpEndpoint == "" {
-		fmt.Printf("No value for '%s' was provided. Using stdout Exporter.\n", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
-		var err error
-		exporter, err = stdouttrace.New(
-			stdouttrace.WithPrettyPrint())
-		if err != nil {
-			return nil, fmt.Errorf("failed to create stdout trace exporter: %w", err)
-		}
-	} else {
-		fmt.Printf("Found '%s' for '%s'.\n", otlpEndpoint, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
-		ctx := context.Background()
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		conn, err := grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
-		}
-		exporter, err = otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create grpc OTLP trace exporter: %w", err)
-		}
+	// var exporter sdktrace.SpanExporter
+	// if otlpEndpoint == "" {
+	// 	fmt.Printf("No value for '%s' was provided. Using stdout Exporter.\n", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
+	// 	var err error
+	// 	exporter, err = stdouttrace.New(
+	// 		stdouttrace.WithPrettyPrint())
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("failed to create stdout trace exporter: %w", err)
+	// 	}
+	// } else {
+	// 	fmt.Printf("Found '%s' for '%s'.\n", otlpEndpoint, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT_KEY)
+	// 	ctx := context.Background()
+	// 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 	defer cancel()
+	// 	conn, err := grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
+	// 	}
+	// 	exporter, err = otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("failed to create grpc OTLP trace exporter: %w", err)
+	// 	}
+	// }
+
+	exporter, err := texporter.New()
+	if err != nil {
+		panic(fmt.Sprintf("Could not create trace exporter %s", err))
 	}
 
-	traceProvider := trace.NewTracerProvider(
-		trace.WithResource(&resource),
-		trace.WithBatcher(
+	traceProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithResource(&resource),
+		sdktrace.WithSyncer(
 			exporter,
-			trace.WithBatchTimeout(time.Second), // Default is 5s. Set to 1s for demonstrative purposes.
 		),
 	)
 	return traceProvider, nil
