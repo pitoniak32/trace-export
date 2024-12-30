@@ -24,3 +24,18 @@ The way this is done is by taking a [workflow_run](https://docs.github.com/en/we
   - [ ] Demo of using this service as a standalone github action job
 - [ ] Demo of using this service in a cloud function
 
+## Setup
+
+- https://cloud.google.com/run/docs/tutorials/custom-metrics-opentelemetry-sidecar
+
+```
+gcloud builds submit --tag us-central1-docker.pkg.dev/go-cloud-func-443003/cloud-run-source-deploy/trace-export-app
+
+gcloud builds submit collector --tag us-central1-docker.pkg.dev/go-cloud-func-443003/cloud-run-source-deploy/trace-export-collector
+
+gcloud run services replace service.yaml
+
+gcloud run services add-iam-policy-binding trace-export-service \
+    --member="allUsers" \
+    --role="roles/run.invoker"
+```

@@ -48,7 +48,19 @@ func HandleWorkflowRunInProgress(_w eg.WorkflowRun, runId int64) error {
 	return nil
 }
 
+// func AttributesFromCustomProperties(props []*eg.CustomPropertyValue) []attribute.KeyValue {
+// 	attributes := []attribute.KeyValue{
+// 		attribute.Int64("workflow_run.id", ),
+// 	}
+// 	return attributes
+// }
+
 func HandleWorkflowRunCompleted(w eg.WorkflowRun, runId int64, tracer trace.Tracer) error {
+	// client := github.NewClient(nil).WithAuthToken("")
+	// props, res, err := client.Repositories.GetAllCustomPropertyValues(context.Background(), "", "")
+	// if err != nil {
+	// 	panic("failed to get repo custom properties")
+	// }
 
 	startTime := w.GetRunStartedAt().Time
 	if startTime.IsZero() {
