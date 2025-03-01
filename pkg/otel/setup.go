@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -23,7 +24,7 @@ const OTEL_EXPORTER_OTLP_ENDPOINT_KEY string = "OTEL_EXPORTER_OTLP_ENDPOINT"
 const CLOUD_RUN_EXECUTION_KEY string = "CLOUD_RUN_EXECUTION"
 const CLOUD_RUN_TASK_INDEX_KEY string = "CLOUD_RUN_TASK_INDEX"
 
-const serviceTracerName = "github.com/pitoniak32/trace-export"
+const SERVICE_TRACER_NAME = "github.com/pitoniak32/trace-export"
 const workflowRunTracerName = "github.com/pitoniak32/trace-export/workflow_run"
 
 var (
@@ -94,7 +95,8 @@ func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTrac
 		return
 	}
 	shutdownFuncs = append(shutdownFuncs, tracerProviderService.Shutdown)
-	serviceTracer = tracerProviderService.Tracer(serviceTracerName)
+	otel.SetTracerProvider(tracerProviderService)
+	serviceTracer = tracerProviderService.Tracer(SERVICE_TRACER_NAME)
 
 	return
 }
@@ -125,7 +127,7 @@ func NewTracerProvider(resource resource.Resource) (*sdktrace.TracerProvider, er
 		}
 	}
 
-	// Google exporter 
+	// Google exporter
 	// exporter, err := texporter.New()
 	// if err != nil {
 	// 	panic(fmt.Sprintf("Could not create trace exporter %s", err))

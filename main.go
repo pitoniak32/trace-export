@@ -14,6 +14,7 @@ import (
 	"time"
 
 	eg "github.com/google/go-github/v66/github"
+	"github.com/pitoniak32/trace-export/pkg/cache"
 	ig "github.com/pitoniak32/trace-export/pkg/github"
 	"github.com/pitoniak32/trace-export/pkg/otel"
 
@@ -27,7 +28,7 @@ var (
 	otelShutdown      func(context.Context) error
 )
 
-func init() {
+func setup() context.Context {
 	// Set up OpenTelemetry.
 	ctx := context.Background()
 	var err error
@@ -36,11 +37,32 @@ func init() {
 		var _ = otelShutdown(ctx)
 		panic(fmt.Sprintf("Failed to setup OtelSDK because of: %s", err))
 	}
+
+	return ctx
 }
 
 func main() {
 
-	if err := run(); err != nil {
+	ctx := setup()
+
+	propCache := cache.NewPropCache()
+
+	entry := cache.CacheEntry{
+		UpdatedAtMillis: time.Now().UnixMilli(),
+		Props:           map[string]string{"foo": "bar"},
+	}
+
+	propCache.Insert("trace-export", entry)
+	for i := range 5 {
+		propCache.Insert(fmt.Sprintf("trace-export-%d", i), entry)
+	}
+
+	ctxCancelScheduledRefresh, cancelScheduledRefresh := context.WithCancel(ctx)
+	defer cancelScheduledRefresh()
+
+	propCache.ScheduleRefresh(ctxCancelScheduledRefresh, 5*time.Second)
+
+	if err := run(&propCache); err != nil {
 		log.Fatalln(err)
 	}
 
@@ -70,7 +92,7 @@ func main() {
 	// }
 }
 
-func run() (err error) {
+func run(propCache *cache.PropCache) (err error) {
 	// Handle SIGINT (CTRL+C) gracefully.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -86,7 +108,7 @@ func run() (err error) {
 		BaseContext:  func(_ net.Listener) context.Context { return ctx },
 		ReadTimeout:  time.Second,
 		WriteTimeout: 10 * time.Second,
-		Handler:      newHTTPHandler(),
+		Handler:      newHTTPHandler(propCache),
 	}
 	srvErr := make(chan error, 1)
 	go func() {
@@ -111,7 +133,7 @@ func run() (err error) {
 	return
 }
 
-func newHTTPHandler() http.Handler {
+func newHTTPHandler(propCache *cache.PropCache) http.Handler {
 	mux := http.NewServeMux()
 
 	// handleFunc is a replacement for mux.HandleFunc
@@ -124,6 +146,17 @@ func newHTTPHandler() http.Handler {
 
 	// Register handlers.
 	handleFunc("/webhook", ghWebhook)
+	handleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		propCache.Insert("from-hello", cache.CacheEntry{
+			UpdatedAtMillis: time.Now().UnixMilli(),
+			Props:           map[string]string{"foo": "bar"},
+		})
+		w.WriteHeader(http.StatusAccepted)
+		_, err := w.Write([]byte("hello"))
+		if err != nil {
+			log.Println("failed hello")
+		}
+	})
 
 	// Add HTTP instrumentation for the whole server.
 	handler := otelhttp.NewHandler(mux, "/")
