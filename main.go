@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -22,30 +22,56 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const OTEL_EXPORTER_OTLP_ENDPOINT_KEY string = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
 var (
+	otlpEndpoint      string
 	serviceTracer     trace.Tracer
 	workflowRunTracer trace.Tracer
 	otelShutdown      func(context.Context) error
 )
 
 func setup() context.Context {
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	slog.Info("Getting the collector uri from env!")
+	otlpEndpoint = os.Getenv(OTEL_EXPORTER_OTLP_ENDPOINT_KEY)
+	slog.Info("found value for uri", "key", OTEL_EXPORTER_OTLP_ENDPOINT_KEY, "otlp.endpoint", otlpEndpoint)
+
 	// Set up OpenTelemetry.
 	ctx := context.Background()
 	var err error
-	serviceTracer, workflowRunTracer, otelShutdown, err = otel.SetupOTelSDK(ctx)
+	serviceTracer, workflowRunTracer, otelShutdown, err = otel.SetupOTelSDK(ctx, otlpEndpoint)
 	if err != nil {
 		var _ = otelShutdown(ctx)
-		panic(fmt.Sprintf("Failed to setup OtelSDK because of: %s", err))
+		slog.Error("Failed to setup OtelSDK", "err", err)
+		os.Exit(1)
 	}
 
 	return ctx
 }
 
 func main() {
-
 	ctx := setup()
+	defer otelShutdown(ctx)
 
-	propCache := cache.NewPropCache()
+	client := eg.NewClient(nil).WithAuthToken(os.Getenv("GITHUB_TOKEN"))
+
+	limits, _, err := client.RateLimit.Get(ctx)
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+
+	slog.Info("github ratelimit",
+		"core.limit", limits.Core.Limit,
+		"core.remaining", limits.Core.Remaining,
+		"core.reset", limits.Core.Reset,
+	)
+
+	propCache := cache.NewPropCache(12 * time.Hour)
 
 	entry := cache.CacheEntry{
 		UpdatedAtMillis: time.Now().UnixMilli(),
@@ -53,43 +79,15 @@ func main() {
 	}
 
 	propCache.Insert("trace-export", entry)
-	for i := range 5 {
-		propCache.Insert(fmt.Sprintf("trace-export-%d", i), entry)
-	}
 
 	ctxCancelScheduledRefresh, cancelScheduledRefresh := context.WithCancel(ctx)
 	defer cancelScheduledRefresh()
 
-	propCache.ScheduleRefresh(ctxCancelScheduledRefresh, 5*time.Second)
+	propCache.ScheduleRefresh(ctxCancelScheduledRefresh, 1*time.Hour)
 
 	if err := run(&propCache); err != nil {
-		log.Fatalln(err)
+		slog.Error(err.Error())
 	}
-
-	// plan, err := os.ReadFile("./workflow_run_webhook_events.json")
-	// if err != nil {
-	// 	panic("failed to read test data")
-	// }
-
-	// var events [3]eg.WorkflowRunEvent
-	// err = json.Unmarshal(plan, &events)
-	// if err != nil {
-	// 	panic("failed to unmarshal")
-	// }
-
-	// for i := 0; i < len(events); i++ {
-	// 	event := events[i]
-
-	// 	err := ig.HandlePayload(event)
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 	}
-	// }
-
-	// err = otelShutdown(context.Background())
-	// if err != nil {
-	// 	panic("failure occurred during Otel SDK shutdown")
-	// }
 }
 
 func run(propCache *cache.PropCache) (err error) {
@@ -102,9 +100,11 @@ func run(propCache *cache.PropCache) (err error) {
 		err = errors.Join(err, otelShutdown(context.Background()))
 	}()
 
+	addr := ":8080"
+
 	// Start HTTP server.
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         addr,
 		BaseContext:  func(_ net.Listener) context.Context { return ctx },
 		ReadTimeout:  time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -115,7 +115,7 @@ func run(propCache *cache.PropCache) (err error) {
 		srvErr <- srv.ListenAndServe()
 	}()
 
-	fmt.Println("Starting server!")
+	slog.Info("starting server!", "addr", addr)
 
 	// Wait for interruption.
 	select {
@@ -154,7 +154,7 @@ func newHTTPHandler(propCache *cache.PropCache) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		_, err := w.Write([]byte("hello"))
 		if err != nil {
-			log.Println("failed hello")
+			slog.Error("failed hello")
 		}
 	})
 

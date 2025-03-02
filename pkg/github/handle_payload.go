@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	eg "github.com/google/go-github/v66/github"
@@ -39,12 +40,12 @@ func HandlePayload(payload eg.WorkflowRunEvent, tracer trace.Tracer) error {
 }
 
 func HandleWorkflowRunRequested(_w eg.WorkflowRun, runId int64) error {
-	fmt.Printf("[SKIP]: workflow run '%d' is 'requested'.\n", runId)
+	slog.Debug("skipping workflow run", "run.id", runId, "run.status", "requested")
 	return nil
 }
 
 func HandleWorkflowRunInProgress(_w eg.WorkflowRun, runId int64) error {
-	fmt.Printf("[SKIP]: workflow run '%d' is 'in_progress'.\n", runId)
+	slog.Debug("skipping workflow run", "run.id", runId, "run.status", "in_progress")
 	return nil
 }
 
@@ -92,7 +93,7 @@ func HandleWorkflowRunCompleted(w eg.WorkflowRun, runId int64, tracer trace.Trac
 	ctx, span := tracer.Start(context.Background(), spanName, trace.WithTimestamp(startTime), trace.WithAttributes(attributes...))
 	defer span.End(trace.WithTimestamp(endTime))
 
-	fmt.Printf("[HANDLE]: workflow run '%d' is 'completed'.\n", runId)
+	slog.Debug("handling workflow run", "run.id", runId, "run.status", "completed")
 
 	jobsUrl := w.GetJobsURL()
 	if jobsUrl == "" {

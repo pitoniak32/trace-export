@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -33,41 +32,42 @@ type PropCache struct {
 	entryRefreshFn func(ctx context.Context, name string, entry *CacheEntry) error
 }
 
-func NewPropCache() PropCache {
+func NewPropCache(expireAfter time.Duration) PropCache {
 	c := PropCache{
-		expireAfter: 10 * time.Second,
+		expireAfter: expireAfter,
 		entries:     make(map[string]CacheEntry),
 		entryRefreshFn: func(ctx context.Context, name string, entry *CacheEntry) error {
 			span := trace.SpanFromContext(ctx)
 
+			time.Sleep(2 * time.Second)
 			// Create a timeout to make sure that the refresh doesnt hang forever
-			ctxTimeout, cancelRefresh := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelRefresh()
+			// ctxTimeout, cancelRefresh := context.WithTimeout(ctx, 5*time.Second)
+			// defer cancelRefresh()
 
-			req, err := http.NewRequestWithContext(ctxTimeout, http.MethodGet, "https://jsonplaceholder.typicode.com/todos/1", nil)
-			if err != nil {
-				fmt.Println("Error creating request:", err)
-				return err
-			}
-
-			client := &http.Client{}
-			resp, err := client.Do(req)
-			if err != nil {
-				return err
-			}
-			defer resp.Body.Close()
-
-			body, _ := io.ReadAll(resp.Body)
-			fmt.Println("Response:", string(body))
+			// req, err := http.NewRequestWithContext(ctxTimeout, http.MethodGet, "https://jsonplaceholder.typicode.com/todos/1", nil)
+			// if err != nil {
+			// 	fmt.Println("Error creating request:", err)
+			// 	return err
+			// }
+			//
+			// client := &http.Client{}
+			// resp, err := client.Do(req)
+			// if err != nil {
+			// 	return err
+			// }
+			// defer resp.Body.Close()
+			//
+			// body, _ := io.ReadAll(resp.Body)
+			// fmt.Println("Response:", string(body))
 
 			if name == "trace-export" {
-				err = fmt.Errorf("ran into error updating repo '%s'", name)
+				err := fmt.Errorf("ran into error updating repo '%s'", name)
 				span.SetStatus(codes.Error, err.Error())
 			} else {
 				entry.UpdatedAtMillis = time.Now().UnixMilli()
 			}
 
-			return err
+			return nil
 		},
 	}
 	return c
@@ -100,7 +100,7 @@ func (c *PropCache) ScheduleRefresh(ctx context.Context, interval time.Duration)
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Println(ctx.Err().Error())
+				slog.Error(ctx.Err().Error())
 				return
 			default:
 				runAndWait(interval, func() {
@@ -109,24 +109,33 @@ func (c *PropCache) ScheduleRefresh(ctx context.Context, interval time.Duration)
 
 					var joined interface{ Unwrap() []error }
 
-					successCount, errs := c.RefreshCacheExpiredAt(ctx, time.Now().Add(10_001*time.Millisecond))
+					successCount, skippedCount, errs := c.RefreshCacheExpiredAt(ctx, time.Now())
 
 					failedCount := 0
 
 					if errors.As(errs, &joined) {
 						joinedErrs := joined.Unwrap()
 						for _, err := range joinedErrs {
-							fmt.Printf("[REFRESH]: Error - failed to refresh cache entry: %s\n", err)
+							slog.Error("failed to refresh cache entry: %s\n", err)
 						}
 						failedCount = len(joinedErrs)
 					}
 
-					span.SetAttributes(
+					attrs := []attribute.KeyValue{
 						attribute.Int("refresh.total.succeeded", successCount),
+						attribute.Int("refresh.total.skipped", skippedCount),
 						attribute.Int("refresh.total.failed", failedCount),
-					)
+					}
 
-					fmt.Printf("[REFRESH]: Summary - success: %d, failed: %d\n", successCount, failedCount)
+					span.SetAttributes(attrs...)
+
+					spanContext := trace.SpanContextFromContext(ctx)
+					slog.InfoContext(ctx, "Refresh Summary",
+						slog.Int("refresh.total.succeeded", successCount),
+						slog.Int("refresh.total.skipped", skippedCount),
+						slog.Int("refresh.total.failed", failedCount),
+						slog.Any("trace_id", spanContext.TraceID()),
+					)
 				})
 			}
 		}
@@ -134,7 +143,7 @@ func (c *PropCache) ScheduleRefresh(ctx context.Context, interval time.Duration)
 }
 
 // unixMillis - the time in unixMillis that should be used to determine expired entries
-func (c *PropCache) RefreshCacheExpiredAt(ctx context.Context, expireAfter time.Time) (int, error) {
+func (c *PropCache) RefreshCacheExpiredAt(ctx context.Context, expireAfter time.Time) (int, int, error) {
 	return c.refreshCache(ctx, func(ctx context.Context, name string, entry CacheEntry) bool {
 		elapsed := expireAfter.UnixMilli() - entry.UpdatedAtMillis
 		return elapsed >= c.expireAfter.Milliseconds()
@@ -142,7 +151,7 @@ func (c *PropCache) RefreshCacheExpiredAt(ctx context.Context, expireAfter time.
 }
 
 // will refresh all cache entries even if they have not expired
-func (c *PropCache) RefreshCacheForce(ctx context.Context) (int, error) {
+func (c *PropCache) RefreshCacheForce(ctx context.Context) (int, int, error) {
 	ctx, span := tracer.Start(ctx, "RefreshCacheForce")
 	defer span.End()
 
@@ -151,10 +160,11 @@ func (c *PropCache) RefreshCacheForce(ctx context.Context) (int, error) {
 	})
 }
 
-func (c *PropCache) refreshCache(ctx context.Context, isExpired func(ctx context.Context, name string, entry CacheEntry) bool) (int, error) {
+func (c *PropCache) refreshCache(ctx context.Context, isExpired func(ctx context.Context, name string, entry CacheEntry) bool) (int, int, error) {
 	var wg sync.WaitGroup
 	ch := make(chan error)
 
+	skippedCount := 0
 	for name, entry := range c.entries {
 		ctx, span := tracer.Start(ctx, name)
 		defer span.End()
@@ -171,6 +181,8 @@ func (c *PropCache) refreshCache(ctx context.Context, isExpired func(ctx context
 				defer wg.Done()
 				ch <- c.entryRefreshFn(ctx, name, &entry)
 			}()
+		} else {
+			skippedCount += 1
 		}
 	}
 
@@ -189,5 +201,5 @@ func (c *PropCache) refreshCache(ctx context.Context, isExpired func(ctx context
 		}
 	}
 
-	return successCount, errs
+	return successCount, skippedCount, errs
 }

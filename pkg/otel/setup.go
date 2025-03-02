@@ -19,27 +19,15 @@ import (
 	ot "go.opentelemetry.io/otel/trace"
 )
 
-const OTEL_EXPORTER_OTLP_ENDPOINT_KEY string = "OTEL_EXPORTER_OTLP_ENDPOINT"
-
 const CLOUD_RUN_EXECUTION_KEY string = "CLOUD_RUN_EXECUTION"
 const CLOUD_RUN_TASK_INDEX_KEY string = "CLOUD_RUN_TASK_INDEX"
 
 const SERVICE_TRACER_NAME = "github.com/pitoniak32/trace-export"
 const workflowRunTracerName = "github.com/pitoniak32/trace-export/workflow_run"
 
-var (
-	otlpEndpoint string
-)
-
-// init functions are always executed.
-func init() {
-	fmt.Println("Getting the collector uri from env!")
-	otlpEndpoint = os.Getenv(OTEL_EXPORTER_OTLP_ENDPOINT_KEY)
-}
-
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
-func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTracer ot.Tracer, shutdown func(context.Context) error, err error) {
+func SetupOTelSDK(ctx context.Context, otlpEndpoint string) (serviceTracer ot.Tracer, workflowRunTracer ot.Tracer, shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
 	// shutdown calls cleanup functions registered via shutdownFuncs.
@@ -71,7 +59,7 @@ func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTrac
 	if err != nil {
 		panic(fmt.Sprintf("failed to setup workflow run tracer provider resource: %s", err))
 	}
-	tracerProviderWorkflowRun, err := NewTracerProvider(*wfResource)
+	tracerProviderWorkflowRun, err := NewTracerProvider(otlpEndpoint, *wfResource)
 	if err != nil {
 		handleErr(err)
 		return
@@ -89,7 +77,7 @@ func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTrac
 	if err != nil {
 		panic(fmt.Sprintf("failed to setup service tracer provider resource: %s", err))
 	}
-	tracerProviderService, err := NewTracerProvider(*sResource)
+	tracerProviderService, err := NewTracerProvider(otlpEndpoint, *sResource)
 	if err != nil {
 		handleErr(err)
 		return
@@ -101,11 +89,10 @@ func SetupOTelSDK(ctx context.Context) (serviceTracer ot.Tracer, workflowRunTrac
 	return
 }
 
-func NewTracerProvider(resource resource.Resource) (*sdktrace.TracerProvider, error) {
+func NewTracerProvider(otlpEndpoint string, resource resource.Resource) (*sdktrace.TracerProvider, error) {
 
 	var exporter sdktrace.SpanExporter
 	if otlpEndpoint == "" {
-		fmt.Printf("No value for '%s' was provided. Using stdout Exporter.\n", OTEL_EXPORTER_OTLP_ENDPOINT_KEY)
 		var err error
 		exporter, err = stdouttrace.New(
 			stdouttrace.WithPrettyPrint())
@@ -113,7 +100,6 @@ func NewTracerProvider(resource resource.Resource) (*sdktrace.TracerProvider, er
 			return nil, fmt.Errorf("failed to create stdout trace exporter: %w", err)
 		}
 	} else {
-		fmt.Printf("Found '%s' for '%s'.\n", otlpEndpoint, OTEL_EXPORTER_OTLP_ENDPOINT_KEY)
 		ctx := context.Background()
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
